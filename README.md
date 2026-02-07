@@ -100,7 +100,8 @@ Shannon is available in two editions:
 
 ### Prerequisites
 
-- **Docker** - Container runtime ([Install Docker](https://docs.docker.com/get-docker/))
+- **Node.js 20+** (with npm)
+- **Temporal CLI** - Local Temporal server ([Install Temporal CLI](https://docs.temporal.io/cli))
 - **AI Provider Credentials** (choose one):
   - **Anthropic API key** (recommended) - Get from [Anthropic Console](https://console.anthropic.com)
   - **Claude Code OAuth token**
@@ -113,7 +114,11 @@ Shannon is available in two editions:
 git clone https://github.com/KeygraphHQ/shannon.git
 cd shannon
 
-# 2. Configure credentials (choose one method)
+# 2. Install dependencies (first run only)
+npm install
+npm --prefix mcp-server install
+
+# 3. Configure credentials (choose one method)
 
 # Option A: Export environment variables
 export ANTHROPIC_API_KEY="your-api-key"              # or CLAUDE_CODE_OAUTH_TOKEN
@@ -125,11 +130,11 @@ ANTHROPIC_API_KEY=your-api-key
 CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 EOF
 
-# 3. Run a pentest
+# 4. Run a pentest
 ./shannon start URL=https://your-app.com REPO=/path/to/your/repo
 ```
 
-Shannon will build the containers, start the workflow, and return a workflow ID. The pentest runs in the background.
+Shannon will build local artifacts (if needed), start the Temporal server and worker, and return a workflow ID. The pentest runs in the background.
 
 ### Monitoring Progress
 
@@ -147,10 +152,10 @@ open http://localhost:8233
 ### Stopping Shannon
 
 ```bash
-# Stop all containers (preserves workflow data)
+# Stop local processes (preserves workflow data)
 ./shannon stop
 
-# Full cleanup (removes all data)
+# Full cleanup (removes all local Temporal data)
 ./shannon stop CLEAN=true
 ```
 
@@ -192,21 +197,10 @@ git clone https://github.com/your-org/api.git
 
 ### Platform-Specific Instructions
 
-**For Linux (Native Docker):**
+**For Linux and macOS:**
 
-You may need to run commands with `sudo` depending on your Docker setup. If you encounter permission issues with output files, ensure your user has access to the Docker socket.
-
-**For macOS:**
-
-Works out of the box with Docker Desktop installed.
-
-**Testing Local Applications:**
-
-Docker containers cannot reach `localhost` on your host machine. Use `host.docker.internal` in place of `localhost`:
-
-```bash
-./shannon start URL=http://host.docker.internal:3000 REPO=/path/to/repo
-```
+- Ensure the `temporal` CLI is available on your PATH.
+- Local applications can be tested directly with `localhost` URLs (no container networking required).
 
 ### Configuration (Optional)
 
@@ -475,7 +469,7 @@ Shannon is designed for legitimate security auditing purposes only.
 
 #### **6. Windows Antivirus False Positives**
 
-Windows Defender may flag files in `xben-benchmark-results/` or `deliverables/` as malware. These are false positives caused by exploit code in the reports. Add an exclusion for the Shannon directory in Windows Defender, or use Docker/WSL2.
+Windows Defender may flag files in `xben-benchmark-results/` or `deliverables/` as malware. These are false positives caused by exploit code in the reports. Add an exclusion for the Shannon directory in Windows Defender, or use WSL2.
 
 
 ## 📜 License
