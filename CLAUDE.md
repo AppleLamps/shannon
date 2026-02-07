@@ -9,10 +9,11 @@ This is an AI-powered penetration testing agent designed for defensive security 
 ## Commands
 
 ### Prerequisites
-- **Docker** - Container runtime
+- **Node.js 20+** (with npm)
+- **Temporal CLI** - Local Temporal server
 - **Anthropic API key** - Set in `.env` file
 
-### Running the Penetration Testing Agent (Docker + Temporal)
+### Running the Penetration Testing Agent (Local Temporal)
 ```bash
 # Configure credentials
 cp .env.example .env
@@ -40,8 +41,8 @@ Examples:
 
 ### Stopping Shannon
 ```bash
-./shannon stop                      # Stop containers (preserves workflow data)
-./shannon stop CLEAN=true           # Full cleanup including volumes
+./shannon stop                      # Stop local processes (preserves workflow data)
+./shannon stop CLEAN=true           # Full cleanup including local Temporal data
 ```
 
 ### Options
@@ -49,7 +50,7 @@ Examples:
 CONFIG=<file>          YAML configuration file for authentication and testing parameters
 OUTPUT=<path>          Custom output directory for session folder (default: ./audit-logs/)
 PIPELINE_TESTING=true  Use minimal prompts and fast retry intervals (10s instead of 5min)
-REBUILD=true           Force Docker rebuild with --no-cache (use when code changes aren't picked up)
+REBUILD=true           Force local rebuild (use when code changes aren't picked up)
 ROUTER=true            Route requests through claude-code-router for multi-model support
 ```
 
@@ -302,12 +303,12 @@ ROUTER_DEFAULT=openrouter,google/gemini-3-flash-preview
 ### Common Issues
 - **"Repository not found"**: Ensure target local directory exists and is accessible
 
-### Temporal & Docker Issues
-- **"Temporal not ready"**: Wait for health check or run `docker compose logs temporal`
-- **Worker not processing**: Ensure worker container is running with `docker compose ps`
-- **Reset workflow state**: `./shannon stop CLEAN=true` removes all Temporal data and volumes
-- **Local apps unreachable**: Use `host.docker.internal` instead of `localhost` for URLs
-- **Container permissions**: On Linux, may need `sudo` for docker commands
+### Temporal Issues
+- **"Temporal not ready"**: Wait for health check or check `.shannon/temporal.log`
+- **Worker not processing**: Ensure the worker process is running (check `.shannon/worker.log`)
+- **Reset workflow state**: `./shannon stop CLEAN=true` removes all local Temporal data
+- **Custom Temporal address**: Set `TEMPORAL_ADDRESS=<host:port>` to point at a remote server
+- **Custom bind IP**: Set `TEMPORAL_BIND_IP=<ip>` to change the local Temporal bind interface
 
 ### External Tool Dependencies
 Missing tools can be skipped using `PIPELINE_TESTING=true` mode during development:

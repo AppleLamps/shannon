@@ -3,7 +3,12 @@
 
 set -e
 
-COMPOSE_FILE="docker-compose.yml"
+RUNTIME_DIR="${SHANNON_RUNTIME_DIR:-.shannon}"
+TEMPORAL_PID_FILE="$RUNTIME_DIR/temporal.pid"
+WORKER_PID_FILE="$RUNTIME_DIR/worker.pid"
+TEMPORAL_LOG_FILE="$RUNTIME_DIR/temporal.log"
+WORKER_LOG_FILE="$RUNTIME_DIR/worker.log"
+TEMPORAL_DB_FILE="$RUNTIME_DIR/temporal.db"
 
 # Load .env if present
 if [ -f .env ]; then
@@ -28,17 +33,18 @@ Usage:
   ./shannon start URL=<url> REPO=<path>   Start a pentest workflow
   ./shannon logs ID=<workflow-id>         Tail logs for a specific workflow
   ./shannon query ID=<workflow-id>        Query workflow progress
-  ./shannon stop                          Stop all containers
+  ./shannon stop                          Stop local Temporal and worker processes
   ./shannon help                          Show this help message
 
 Options for 'start':
   CONFIG=<path>          Configuration file (YAML)
   OUTPUT=<path>          Output directory for reports (default: ./audit-logs/)
   PIPELINE_TESTING=true  Use minimal prompts for fast testing
+  REBUILD=true           Force local rebuild of TypeScript artifacts
   ROUTER=true            Route requests through claude-code-router (multi-model support)
 
 Options for 'stop':
-  CLEAN=true             Remove all data including volumes
+  CLEAN=true             Remove all local Temporal data
 
 Examples:
   ./shannon start URL=https://example.com REPO=/path/to/repo
@@ -69,36 +75,111 @@ parse_args() {
   done
 }
 
-# Check if Temporal is running and healthy
-is_temporal_ready() {
-  docker compose -f "$COMPOSE_FILE" exec -T temporal \
-    temporal operator cluster health --address localhost:7233 2>/dev/null | grep -q "SERVING"
+ensure_runtime_dir() {
+  mkdir -p "$RUNTIME_DIR"
 }
 
-# Ensure containers are running with correct mounts
-ensure_containers() {
-  # If custom OUTPUT_DIR is set, always refresh worker to ensure correct volume mount
-  # Docker compose will only recreate if the mount actually changed
-  if [ -n "$OUTPUT_DIR" ]; then
-    echo "Ensuring worker has correct output mount..."
-    docker compose -f "$COMPOSE_FILE" up -d worker 2>/dev/null || true
+is_pid_running() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return 1
+  fi
+  kill -0 "$pid" 2>/dev/null
+}
+
+pid_from_file() {
+  local pid_file="$1"
+  if [ -f "$pid_file" ]; then
+    cat "$pid_file"
+  fi
+}
+
+require_temporal_cli() {
+  if ! command -v temporal >/dev/null 2>&1; then
+    echo "ERROR: Temporal CLI not found."
+    echo "Install it from https://docs.temporal.io/cli and try again."
+    exit 1
+  fi
+}
+
+is_temporal_ready() {
+  local address="${TEMPORAL_ADDRESS:-localhost:7233}"
+  temporal operator cluster health --address "$address" 2>/dev/null | grep -q "SERVING"
+}
+
+ensure_dependencies() {
+  if [ ! -d node_modules ]; then
+    echo "Installing Shannon dependencies..."
+    npm install
+  fi
+  if [ ! -d mcp-server/node_modules ]; then
+    echo "Installing MCP server dependencies..."
+    npm --prefix mcp-server install
+  fi
+}
+
+ensure_build() {
+  local needs_mcp_build="false"
+  local needs_shannon_build="false"
+
+  if [ "$REBUILD" = "true" ] || [ ! -f "mcp-server/dist/index.js" ]; then
+    needs_mcp_build="true"
   fi
 
-  # Quick check: if Temporal is already healthy, we're good
+  if [ "$REBUILD" = "true" ] || [ ! -f "dist/temporal/client.js" ] || [ ! -f "dist/temporal/worker.js" ] || [ ! -f "dist/temporal/query.js" ]; then
+    needs_shannon_build="true"
+  fi
+
+  if [ "$needs_mcp_build" = "true" ] || [ "$needs_shannon_build" = "true" ]; then
+    ensure_dependencies
+    if [ "$needs_mcp_build" = "true" ]; then
+      npm --prefix mcp-server run build
+    fi
+    if [ "$needs_shannon_build" = "true" ]; then
+      npm run build
+    fi
+  fi
+}
+
+ensure_temporal() {
+  local address="${TEMPORAL_ADDRESS:-localhost:7233}"
+  local bind_ip="${TEMPORAL_BIND_IP:-127.0.0.1}"
+
+  require_temporal_cli
+
   if is_temporal_ready; then
     return 0
   fi
 
-  # Need to start containers
-  echo "Starting Shannon containers..."
-  if [ "$REBUILD" = "true" ]; then
-    # Force rebuild without cache (use when code changes aren't being picked up)
-    echo "Rebuilding with --no-cache..."
-    docker compose -f "$COMPOSE_FILE" build --no-cache worker
+  if [ "$address" != "localhost:7233" ] && [ "$address" != "127.0.0.1:7233" ] && [ "$address" != "${bind_ip}:7233" ]; then
+    echo "ERROR: Temporal is not reachable at ${address}."
+    echo "Start the Temporal server and try again."
+    exit 1
   fi
-  docker compose -f "$COMPOSE_FILE" up -d --build
 
-  # Wait for Temporal to be ready
+  if [ "$bind_ip" = "0.0.0.0" ]; then
+    echo "WARNING: TEMPORAL_BIND_IP is set to 0.0.0.0; the dev server has no auth and will be exposed on all interfaces."
+  elif [ "$bind_ip" != "127.0.0.1" ]; then
+    echo "WARNING: TEMPORAL_BIND_IP is set to ${bind_ip}. The dev server has no auth; ensure this is intended."
+  fi
+
+  ensure_runtime_dir
+
+  local pid
+  pid="$(pid_from_file "$TEMPORAL_PID_FILE")"
+  if ! is_pid_running "$pid"; then
+    echo "Starting Temporal server..."
+    temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip "$bind_ip" > "$TEMPORAL_LOG_FILE" 2>&1 &
+    local temporal_pid=$!
+    echo "$temporal_pid" > "$TEMPORAL_PID_FILE"
+    sleep 1
+    if ! is_pid_running "$temporal_pid"; then
+      echo "ERROR: Temporal server failed to start. Check ${TEMPORAL_LOG_FILE}."
+      rm -f "$TEMPORAL_PID_FILE"
+      exit 1
+    fi
+  fi
+
   echo "Waiting for Temporal to be ready..."
   for i in $(seq 1 30); do
     if is_temporal_ready; then
@@ -111,6 +192,51 @@ ensure_containers() {
     fi
     sleep 2
   done
+}
+
+ensure_worker() {
+  ensure_runtime_dir
+
+  local pid
+  pid="$(pid_from_file "$WORKER_PID_FILE")"
+  if is_pid_running "$pid"; then
+    return 0
+  fi
+
+  echo "Starting Shannon worker..."
+  node dist/temporal/worker.js > "$WORKER_LOG_FILE" 2>&1 &
+  local worker_pid=$!
+  echo "$worker_pid" > "$WORKER_PID_FILE"
+  sleep 1
+  if ! is_pid_running "$worker_pid"; then
+    echo "ERROR: Shannon worker failed to start. Check ${WORKER_LOG_FILE}."
+    rm -f "$WORKER_PID_FILE"
+    exit 1
+  fi
+}
+
+stop_process() {
+  local pid_file="$1"
+  local label="$2"
+  local pid
+
+  pid="$(pid_from_file "$pid_file")"
+  if is_pid_running "$pid"; then
+    echo "Stopping ${label} (PID ${pid})..."
+    kill "$pid"
+    for _ in $(seq 1 10); do
+      if ! is_pid_running "$pid"; then
+        break
+      fi
+      sleep 1
+    done
+    if is_pid_running "$pid"; then
+      echo "Force stopping ${label} (PID ${pid})..."
+      kill -9 "$pid"
+    fi
+  fi
+
+  rm -f "$pid_file"
 }
 
 cmd_start() {
@@ -135,78 +261,58 @@ cmd_start() {
     fi
   fi
 
-  # Determine container path for REPO
-  # - If REPO is already a container path (/benchmarks/*, /target-repo), use as-is
-  # - Otherwise, it's a host path - mount to /target-repo and use that
-  case "$REPO" in
-    /benchmarks/*|/target-repo|/target-repo/*)
-      CONTAINER_REPO="$REPO"
-      ;;
-    *)
-      # Host path - export for docker-compose mount
-      export TARGET_REPO="$REPO"
-      CONTAINER_REPO="/target-repo"
-      ;;
-  esac
+  if [ -n "$REPO" ] && [ -d "$REPO" ]; then
+    REPO="$(cd "$REPO" && pwd)"
+  fi
 
-  # Handle custom OUTPUT directory
-  # Export OUTPUT_DIR for docker-compose volume mount BEFORE starting containers
   if [ -n "$OUTPUT" ]; then
-    # Create output directory with write permissions for container user (UID 1001)
     mkdir -p "$OUTPUT"
-    chmod 777 "$OUTPUT"
-    export OUTPUT_DIR="$OUTPUT"
+    if [ -d "$OUTPUT" ]; then
+      OUTPUT="$(cd "$OUTPUT" && pwd)"
+    fi
   fi
 
   # Handle ROUTER flag - start claude-code-router for multi-model support
   if [ "$ROUTER" = "true" ]; then
-    # Check if router is already running
-    if docker compose -f "$COMPOSE_FILE" --profile router ps router 2>/dev/null | grep -q "running"; then
-      echo "Router already running, skipping startup..."
-    else
-      echo "Starting claude-code-router..."
-
-      # Check for provider API keys
-      if [ -z "$OPENAI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
-        echo "WARNING: No provider API key set (OPENAI_API_KEY or OPENROUTER_API_KEY). Router may not work."
-      fi
-
-      # Start router with profile
-      docker compose -f "$COMPOSE_FILE" --profile router up -d router
-
-      # Give router a few seconds to start (health check disabled for now - TODO: debug later)
-      echo "Waiting for router to start..."
-      sleep 5
+    if [ -z "$OPENAI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
+      echo "WARNING: No provider API key set (OPENAI_API_KEY or OPENROUTER_API_KEY). Router may not work."
     fi
 
-    # Set ANTHROPIC_BASE_URL to route through router
-    export ANTHROPIC_BASE_URL="http://router:3456"
-    # Set auth token to match router's APIKEY
-    export ANTHROPIC_AUTH_TOKEN="shannon-router-key"
+    export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:3456}"
+    export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-shannon-router-key}"
+    echo "Router mode enabled. Ensure claude-code-router is running at ${ANTHROPIC_BASE_URL}."
+    if command -v curl >/dev/null 2>&1; then
+      local router_health_url="${ANTHROPIC_BASE_URL%/}/health"
+      if ! curl -fsS "$router_health_url" >/dev/null 2>&1; then
+        echo "WARNING: claude-code-router is not responding at ${router_health_url}."
+      fi
+    fi
   fi
 
-  # Ensure audit-logs directory exists with write permissions for container user (UID 1001)
-  mkdir -p ./audit-logs
-  chmod 777 ./audit-logs
+  export TEMPORAL_ADDRESS="${TEMPORAL_ADDRESS:-localhost:7233}"
 
-  # Ensure containers are running (starts them if needed)
-  ensure_containers
+  ensure_build
+
+  if [ -z "$OUTPUT" ]; then
+    mkdir -p ./audit-logs
+  fi
+
+  # Ensure Temporal server and worker are running (starts them if needed)
+  ensure_temporal
+  ensure_worker
 
   # Build optional args
   ARGS=""
   [ -n "$CONFIG" ] && ARGS="$ARGS --config $CONFIG"
 
-  # Pass container path for output (where OUTPUT_DIR is mounted)
-  # Also pass display path so client can show the host path to user
   if [ -n "$OUTPUT" ]; then
-    ARGS="$ARGS --output /app/output --display-output $OUTPUT"
+    ARGS="$ARGS --output $OUTPUT"
   fi
 
   [ "$PIPELINE_TESTING" = "true" ] && ARGS="$ARGS --pipeline-testing"
 
   # Run the client to submit workflow
-  docker compose -f "$COMPOSE_FILE" exec -T worker \
-    node dist/temporal/client.js "$URL" "$CONTAINER_REPO" $ARGS
+  node dist/temporal/client.js "$URL" "$REPO" $ARGS
 }
 
 cmd_logs() {
@@ -258,17 +364,19 @@ cmd_query() {
     exit 1
   fi
 
-  docker compose -f "$COMPOSE_FILE" exec -T worker \
-    node dist/temporal/query.js "$ID"
+  export TEMPORAL_ADDRESS="${TEMPORAL_ADDRESS:-localhost:7233}"
+  ensure_build
+  node dist/temporal/query.js "$ID"
 }
 
 cmd_stop() {
   parse_args "$@"
 
+  stop_process "$WORKER_PID_FILE" "worker"
+  stop_process "$TEMPORAL_PID_FILE" "Temporal server"
+
   if [ "$CLEAN" = "true" ]; then
-    docker compose -f "$COMPOSE_FILE" --profile router down -v
-  else
-    docker compose -f "$COMPOSE_FILE" --profile router down
+    rm -rf "$RUNTIME_DIR"
   fi
 }
 

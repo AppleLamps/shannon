@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "temporal:server": "docker compose -f docker/docker-compose.temporal.yml up temporal -d",
-    "temporal:server:stop": "docker compose -f docker/docker-compose.temporal.yml down",
+    "temporal:server": "temporal server start-dev --db-filename .shannon/temporal.db --ip 127.0.0.1",
+    "temporal:server:stop": "echo \"Temporal server runs in the foreground. Stop it with Ctrl+C or use ./shannon stop for Shannon-managed processes.\"",
     "temporal:worker": "node dist/temporal/worker.js",
     "temporal:start": "node dist/temporal/client.js",
     "temporal:query": "node dist/temporal/query.js"
