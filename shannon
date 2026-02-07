@@ -151,15 +151,11 @@ ensure_temporal() {
     return 0
   fi
 
-  case "$address" in
-    localhost:7233|127.0.0.1:7233|${bind_ip}:7233)
-      ;;
-    *)
-      echo "ERROR: Temporal is not reachable at ${address}."
-      echo "Start the Temporal server and try again."
-      exit 1
-      ;;
-  esac
+  if [ "$address" != "localhost:7233" ] && [ "$address" != "127.0.0.1:7233" ] && [ "$address" != "${bind_ip}:7233" ]; then
+    echo "ERROR: Temporal is not reachable at ${address}."
+    echo "Start the Temporal server and try again."
+    exit 1
+  fi
 
   if [ "$bind_ip" != "127.0.0.1" ] && [ "$bind_ip" != "0.0.0.0" ]; then
     echo "WARNING: TEMPORAL_BIND_IP is set to ${bind_ip}. Ensure this is intended."
@@ -284,9 +280,9 @@ cmd_start() {
     export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-shannon-router-key}"
     echo "Router mode enabled. Ensure claude-code-router is running at ${ANTHROPIC_BASE_URL}."
     if command -v curl >/dev/null 2>&1; then
-      local router_health="${ANTHROPIC_BASE_URL%/}/health"
-      if ! curl -fsS "$router_health" >/dev/null 2>&1; then
-        echo "WARNING: claude-code-router is not responding at ${router_health}."
+      local router_health_url="${ANTHROPIC_BASE_URL%/}/health"
+      if ! curl -fsS "$router_health_url" >/dev/null 2>&1; then
+        echo "WARNING: claude-code-router is not responding at ${router_health_url}."
       fi
     fi
   fi
