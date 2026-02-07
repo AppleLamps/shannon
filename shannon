@@ -157,7 +157,7 @@ ensure_temporal() {
     echo "Waiting for Temporal to be ready..."
   else
     echo "Starting Temporal server..."
-    temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip 0.0.0.0 > "$TEMPORAL_LOG_FILE" 2>&1 &
+    temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip 127.0.0.1 > "$TEMPORAL_LOG_FILE" 2>&1 &
     echo $! > "$TEMPORAL_PID_FILE"
   fi
 
@@ -204,6 +204,10 @@ stop_process() {
       fi
       sleep 1
     done
+    if is_pid_running "$pid"; then
+      echo "Force stopping ${label} (PID ${pid})..."
+      kill -9 "$pid"
+    fi
   fi
 
   rm -f "$pid_file"
@@ -237,6 +241,9 @@ cmd_start() {
 
   if [ -n "$OUTPUT" ]; then
     mkdir -p "$OUTPUT"
+    if [ -d "$OUTPUT" ]; then
+      OUTPUT="$(cd "$OUTPUT" && pwd)"
+    fi
   fi
 
   # Handle ROUTER flag - start claude-code-router for multi-model support

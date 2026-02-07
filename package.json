@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "temporal:server": "temporal server start-dev --db-filename .shannon/temporal.db --ip 0.0.0.0",
+    "temporal:server": "temporal server start-dev --db-filename .shannon/temporal.db --ip 127.0.0.1",
     "temporal:server:stop": "echo \"Stop the Temporal server process manually or run ./shannon stop if it was started by Shannon.\"",
     "temporal:worker": "node dist/temporal/worker.js",
     "temporal:start": "node dist/temporal/client.js",
