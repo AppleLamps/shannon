@@ -143,6 +143,7 @@ ensure_build() {
 
 ensure_temporal() {
   local address="${TEMPORAL_ADDRESS:-localhost:7233}"
+  local bind_ip="${TEMPORAL_BIND_IP:-127.0.0.1}"
 
   require_temporal_cli
 
@@ -151,7 +152,7 @@ ensure_temporal() {
   fi
 
   case "$address" in
-    localhost:7233|127.0.0.1:7233)
+    localhost:7233|127.0.0.1:7233|${bind_ip}:7233)
       ;;
     *)
       echo "ERROR: Temporal is not reachable at ${address}."
@@ -164,10 +165,9 @@ ensure_temporal() {
 
   local pid
   pid="$(pid_from_file "$TEMPORAL_PID_FILE")"
-  if is_pid_running "$pid"; then
-  else
+  if ! is_pid_running "$pid"; then
     echo "Starting Temporal server..."
-    temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip 127.0.0.1 > "$TEMPORAL_LOG_FILE" 2>&1 &
+    temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip "$bind_ip" > "$TEMPORAL_LOG_FILE" 2>&1 &
     echo $! > "$TEMPORAL_PID_FILE"
   fi
 
@@ -265,6 +265,12 @@ cmd_start() {
     export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:3456}"
     export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-shannon-router-key}"
     echo "Router mode enabled. Ensure claude-code-router is running at ${ANTHROPIC_BASE_URL}."
+    if command -v curl >/dev/null 2>&1; then
+      local router_health="${ANTHROPIC_BASE_URL%/}/health"
+      if ! curl -fsS "$router_health" >/dev/null 2>&1; then
+        echo "WARNING: claude-code-router is not responding at ${router_health}."
+      fi
+    fi
   fi
 
   export TEMPORAL_ADDRESS="${TEMPORAL_ADDRESS:-localhost:7233}"

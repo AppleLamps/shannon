@@ -201,6 +201,7 @@ git clone https://github.com/your-org/api.git
 
 - Ensure the `temporal` CLI is available on your PATH.
 - Local applications can be tested directly with `localhost` URLs (no container networking required).
+- Shannon's local Temporal server binds to `127.0.0.1` by default. Set `TEMPORAL_BIND_IP` to change the bind interface, or `TEMPORAL_ADDRESS` to point at a remote server.
 
 ### Configuration (Optional)
 

@@ -308,6 +308,7 @@ ROUTER_DEFAULT=openrouter,google/gemini-3-flash-preview
 - **Worker not processing**: Ensure the worker process is running (check `.shannon/worker.log`)
 - **Reset workflow state**: `./shannon stop CLEAN=true` removes all local Temporal data
 - **Custom Temporal address**: Set `TEMPORAL_ADDRESS=<host:port>` to point at a remote server
+- **Custom bind IP**: Set `TEMPORAL_BIND_IP=<ip>` to change the local Temporal bind interface
 
 ### External Tool Dependencies
 Missing tools can be skipped using `PIPELINE_TESTING=true` mode during development:
