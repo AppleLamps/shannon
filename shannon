@@ -158,9 +158,9 @@ ensure_temporal() {
   fi
 
   if [ "$bind_ip" = "0.0.0.0" ]; then
-    echo "WARNING: TEMPORAL_BIND_IP is set to 0.0.0.0; this exposes Temporal on all interfaces."
+    echo "WARNING: TEMPORAL_BIND_IP is set to 0.0.0.0; the dev server has no auth and will be exposed on all interfaces."
   elif [ "$bind_ip" != "127.0.0.1" ]; then
-    echo "WARNING: TEMPORAL_BIND_IP is set to ${bind_ip}. Ensure this is intended."
+    echo "WARNING: TEMPORAL_BIND_IP is set to ${bind_ip}. The dev server has no auth; ensure this is intended."
   fi
 
   ensure_runtime_dir
