@@ -119,12 +119,23 @@ ensure_dependencies() {
 }
 
 ensure_build() {
-  if [ "$REBUILD" = "true" ] || [ ! -f "dist/temporal/client.js" ] || [ ! -f "dist/temporal/worker.js" ] || [ ! -f "dist/temporal/query.js" ] || [ ! -f "mcp-server/dist/index.js" ]; then
+  local needs_mcp_build="false"
+  local needs_shannon_build="false"
+
+  if [ "$REBUILD" = "true" ] || [ ! -f "mcp-server/dist/index.js" ]; then
+    needs_mcp_build="true"
+  fi
+
+  if [ "$REBUILD" = "true" ] || [ ! -f "dist/temporal/client.js" ] || [ ! -f "dist/temporal/worker.js" ] || [ ! -f "dist/temporal/query.js" ]; then
+    needs_shannon_build="true"
+  fi
+
+  if [ "$needs_mcp_build" = "true" ] || [ "$needs_shannon_build" = "true" ]; then
     ensure_dependencies
-    if [ "$REBUILD" = "true" ] || [ ! -f "mcp-server/dist/index.js" ]; then
+    if [ "$needs_mcp_build" = "true" ]; then
       npm --prefix mcp-server run build
     fi
-    if [ "$REBUILD" = "true" ] || [ ! -f "dist/temporal/client.js" ] || [ ! -f "dist/temporal/worker.js" ] || [ ! -f "dist/temporal/query.js" ]; then
+    if [ "$needs_shannon_build" = "true" ]; then
       npm run build
     fi
   fi
@@ -140,7 +151,7 @@ ensure_temporal() {
   fi
 
   case "$address" in
-    localhost:7233|127.0.0.1:7233|0.0.0.0:7233)
+    localhost:7233|127.0.0.1:7233)
       ;;
     *)
       echo "ERROR: Temporal is not reachable at ${address}."
@@ -154,7 +165,6 @@ ensure_temporal() {
   local pid
   pid="$(pid_from_file "$TEMPORAL_PID_FILE")"
   if is_pid_running "$pid"; then
-    echo "Waiting for Temporal to be ready..."
   else
     echo "Starting Temporal server..."
     temporal server start-dev --db-filename "$TEMPORAL_DB_FILE" --ip 127.0.0.1 > "$TEMPORAL_LOG_FILE" 2>&1 &
@@ -261,8 +271,9 @@ cmd_start() {
 
   ensure_build
 
-  # Ensure audit-logs directory exists
-  mkdir -p ./audit-logs
+  if [ -z "$OUTPUT" ]; then
+    mkdir -p ./audit-logs
+  fi
 
   # Ensure Temporal server and worker are running (starts them if needed)
   ensure_temporal
